@@ -1,4 +1,5 @@
 import cv2
+import pyodbc 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PySide2.QtCore import (QCoreApplication, QMetaObject, QObject, QPoint,
     QRect, QSize, QUrl, Qt)
@@ -8,12 +9,14 @@ import sys
 import time
 import threading
 import csv
+import os
 import datetime
 from class_CNN import NeuralNetwork
 from class_PlateDetection import PlateDetector
 from utils.average_plate import *
 from utils.find_best_quality_images import get_best_images
 from test2 import ApplicationWindow
+from PIL import Image
 
 ########### INIT ###########
 # Initialize the plate detector
@@ -32,16 +35,42 @@ coordinates = (0, 0)
 num_frame_without_plates = 0
 countPlates_threshold = 11 # the maximum number of images of the same plate to get
 ###########################
+server = 'DESKTOP-RM7E647\SQLEXPRESS' 
+database = 'nhandien' 
+username = 'sa' 
+password = '1' 
+cnxn = pyodbc.connect('DRIVER={SQL Server};SERVER='+server+';DATABASE='+database+';UID='+username+';PWD='+ password)
+
+app = QtWidgets.QApplication(sys.argv)
+
 class ApplicationWindow(QtWidgets.QMainWindow):
-    def __init__(self):
+    def __init__(self,text, img, img2):
         super(ApplicationWindow, self).__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
-        self.ui.label_28.setText(QCoreApplication.translate("MainWindow", u"text", None))
+        self.text = text
+        self.img = img
+        self.img2 = img2
+        self.ui.label_28.setText(QCoreApplication.translate("MainWindow", text, None))
+        self.ui.label_3.setPixmap(QtGui.QPixmap(img))
+        self.ui.label_6.setPixmap(QtGui.QPixmap(img2))
+def insertDB(img1, img2, plate):
+    # Some other example server values are
+    # server = 'localhost\sqlexpress' # for a named instance
+    # server = 'myserver,port' # to specify an alternate port
+    date = datetime.datetime.now().strftime("%m/%d/%Y %H:%M:%S")
+    cursor = cnxn.cursor()
+    m3 = """
+    INSERT INTO bienso (Image, Image2, LicensePlate, CreatedDate) 
+    VALUES ('%s', '%s', '%s', '%s')""" %(img1, img2, plate, date)
+    print(m3)
+    cursor.execute("""
+    INSERT INTO bienso (Image, Image2, LicensePlate, CreatedDate) 
+    VALUES ('%s', '%s', '%s', '%s')""" %(img1, img2, plate, date))  
+    cnxn.commit()
+    
 
-
-
-def recognized_plate(list_char_on_plate, size):
+def recognized_plate(list_char_on_plate, size,res=[]):
     """
     input is a list that contains a images of the same plate
     get the best images in the list
@@ -85,11 +114,12 @@ def recognized_plate(list_char_on_plate, size):
     # writer.writerows(myplate)
     print("recognized plate: " + final_plate)
     print("threading time: " + str(time.time() - t0))
-    return final_plate
+    res.append(final_plate)
     # For IP CAMERA: rtsp://admin:Admin@123456@100.0.0.40/Streaming/Channels/101
     # For Laptop Camera: 0
 cap = cv2.VideoCapture(0) # video path
-
+img1_link = []
+img2_link = [] 
 if __name__=="__main__":
     while(cap.isOpened):
         ret, frame = cap.read()
@@ -124,6 +154,14 @@ if __name__=="__main__":
             if (distance < 100):
                 if(countPlates < countPlates_threshold):
                     cv2.imshow('Plate', possible_plates[0])
+                    im = Image.fromarray(possible_plates[0])
+                    image = cap.read()
+                    
+                    # img.save('image.png')
+                    im.save("regconized%d.png" % countPlates)  
+                    cv2.imwrite("frame%d.jpg" % countPlates, image[1])
+                    img1_link.append(os.getcwd() + '\\' +  "regconized%d.png" % countPlates)
+                    img2_link.append(os.getcwd() + '\\' +  "frame%d.jpg" % countPlates)
                     temp = []
                     temp.append(possible_plates[0])
                     temp.append(plateDetector.char_on_plate[0]) # temp = [image of plate, segmented characters on plate]
@@ -133,7 +171,16 @@ if __name__=="__main__":
                 elif(countPlates == countPlates_threshold):
                     # create a new thread for image recognition
                     q = queue.Queue()
-                    threading.Thread(target=recognized_plate, args=(list_char_on_plate, 128)).start()
+                    res = []
+                    t = threading.Thread(target=recognized_plate, args=(list_char_on_plate, 128,res))
+                    t.start()
+                    t.join()
+                    link1 = ('|').join(img1_link)
+                    link2 = ('|').join(img2_link)
+                    insertDB(link1, link2, res[0])
+                    application = ApplicationWindow(text=res[0], img = img1_link[10], img2 = img2_link[10])
+                    application.show()
+                    # sys.exit(app.exec_())
                     countPlates += 1
             else:
                 countPlates = 0
@@ -149,7 +196,7 @@ if __name__=="__main__":
                 threading.Thread(target=recognized_plate, args=(list_char_on_plate, 128)).start()
                 countPlates = 0
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord('q'): 
             break
     cap.release()
     cv2.destroyAllWindows()
