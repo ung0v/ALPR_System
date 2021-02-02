@@ -1,5 +1,7 @@
 import datetime
 import pyodbc
+import time
+import os
 server = 'DESKTOP-RM7E647\SQLEXPRESS' 
 database = 'nhandien' 
 username = 'sa' 
@@ -32,3 +34,6 @@ def getPlate():
         dataPlate.append(data)
     return dataPlate[10]
 print(getPlate())
+directory = "Regcognized_Plates"
+if not os.path.exists(directory):
+    os.makedirs(directory)

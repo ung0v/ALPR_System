@@ -248,10 +248,7 @@ class video (QtWidgets.QMainWindow, Ui_MainWindow):
                         image = cap.read()
                         
                         # img.save('image.png')
-                        im.save("regconized%d.png" % countPlates)  
-                        cv2.imwrite("frame%d.jpg" % countPlates, image[1])
-                        img1_link.append(os.getcwd() + '\\' +  "regconized%d.png" % countPlates)
-                        img2_link.append(os.getcwd() + '\\' +  "frame%d.jpg" % countPlates)
+                        
                         temp = []
                         temp.append(possible_plates[0])
                         temp.append(plateDetector.char_on_plate[0]) # temp = [image of plate, segmented characters on plate]
@@ -265,12 +262,21 @@ class video (QtWidgets.QMainWindow, Ui_MainWindow):
                         t = threading.Thread(target=recognized_plate, args=(list_char_on_plate, 128,res))
                         t.start()
                         t.join()
-                        link1 = ('|').join(img1_link)
-                        link2 = ('|').join(img2_link)
-                        insertDB(link1, link2, res[0])
+                        directory = "Regcognized_Plates"
+                        plate = res[0]
+                        path = os.getcwd() + '\\' +  directory + "\\"
+                        if not os.path.exists(directory):
+                            os.makedirs(directory)
+                        if not os.path.exists(path + plate):
+                            os.makedirs(path + plate)
+                        img1_link = (path + plate + "\\"+ "regconized%d.png" % countPlates)
+                        img2_link = (path + plate + "\\" + "frame%d.jpg" % countPlates)
+                        im.save(img1_link)  
+                        cv2.imwrite(img2_link, image[1])
+                        insertDB(img1_link, img2_link, plate)
                         self.model = TableModel(getPlate())
                         self.tableView.setModel(self.model)
-                        application = ApplicationWindow(text=res[0], img = img1_link[10], img2 = img2_link[10])
+                        application = ApplicationWindow(text=plate, img = img1_link[10], img2 = img2_link[10])
                         application.show()
                         # sys.exit(app.exec_())
                         countPlates += 1
