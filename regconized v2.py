@@ -1,8 +1,9 @@
 import cv2
 import pyodbc 
 from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtCore import Qt,QObject, QThread, pyqtSignal
 from PySide2.QtCore import (QCoreApplication, QMetaObject, QObject, QPoint,
-    QRect, QSize, QUrl, Qt)
+    QRect, QSize, QUrl, Qt, QThread)
 from design import Ui_Form
 from cam_ui import Ui_MainWindow
 
@@ -19,7 +20,9 @@ from utils.average_plate import *
 from utils.find_best_quality_images import get_best_images
 from test2 import ApplicationWindow
 from PIL import Image
-
+from configparser import ConfigParser
+import serial
+import serial.tools.list_ports
 ########### INIT ###########
 # Initialize the plate detector
 plateDetector = PlateDetector(type_of_plate='RECT_PLATE',
@@ -38,13 +41,26 @@ num_frame_without_plates = 0
 countPlates_threshold = 11 # the maximum number of images of the same plate to get
 ###########################
 dataLicensePlate = []
-server = 'DESKTOP-RM7E647\SQLEXPRESS' 
-database = 'nhandien' 
-username = 'sa' 
-password = '1' 
-cnxn = pyodbc.connect('DRIVER={SQL Server};SERVER='+server+';DATABASE='+database+';UID='+username+';PWD='+ password)
 
+config_object = ConfigParser()
+config_object.read("config/config.ini")
+dbinfo = config_object["DATABASECONFIG"]
+server = dbinfo['server']
+database = dbinfo['database']
+username = dbinfo['username']
+password = dbinfo['password']
+stringSql = 'DRIVER={SQL Server};SERVER='+server+';DATABASE='+database+';UID='+username+';PWD='+ password
+print(stringSql)
+cnxn = pyodbc.connect(stringSql)
+# cnxn = pyodbc.connect(r'Driver=SQL Server;Server=.\SQLEXPRESS;Database=myDB;Trusted_Connection=yes;')
 app = QtWidgets.QApplication(sys.argv)
+class Worker(QObject):
+    finished = pyqtSignal()
+    progress = pyqtSignal(int)
+    def run(self, ser):
+        while 1:            
+            arduinoData = ser.readline().decode('ascii')
+            print(arduinoData)
 
 class ApplicationWindow(QtWidgets.QMainWindow):
     def __init__(self,text, img, img2):
@@ -107,8 +123,12 @@ def insertDB(img1, img2, plate):
     VALUES ('%s', '%s', '%s', '%s')""" %(img1, img2, plate, date))  
     cnxn.commit()
 def getPlate():
-    cursor = cnxn.cursor()
-    cursor.execute("SELECT * FROM bienso order by ID desc")
+    cursor = cnxn.cursor()    
+    try:
+        cursor.execute("SELECT * FROM bienso order by ID desc")
+    except:
+        cursor.execute("CREATE TABLE bienso(ID int not null primary key identity(1,1),Image ntext,Image2 ntext,LicensePlate varchar(50),CreatedDate datetime)")
+        return [['1','1',datetime.datetime.now().strftime("%m/%d/%Y %H:%M:%S")]]
     rows = cursor.fetchall()
     dataPlate = []
     for row in rows:
@@ -166,6 +186,12 @@ def recognized_plate(list_char_on_plate, size,res=[]):
     res.append(final_plate)
     # For IP CAMERA: rtsp://admin:Admin@123456@100.0.0.40/Streaming/Channels/101
     # For Laptop Camera: 0
+def getCOMPORTS():
+    ports = serial.tools.list_ports.comports()
+    lstCOMPORTS = []
+    for port, desc, hwid in sorted(ports):
+        lstCOMPORTS.append(port)
+    return lstCOMPORTS
 class video (QtWidgets.QMainWindow, Ui_MainWindow):
     def __init__(self):
         super().__init__()                  
@@ -173,18 +199,21 @@ class video (QtWidgets.QMainWindow, Ui_MainWindow):
 #        uic.loadUi('test2.ui',self)                           # ---
         self.setupUi(self)                                     # +++
 
-        self.pushButton.clicked.connect(self.start_webcam)
-        self.pushButton_3.clicked.connect(self.exit_app)
-        self.pushButton_2.clicked.connect(self.stop_cap)
+        self.btnStart.clicked.connect(self.start_webcam)
+        self.btnExit.clicked.connect(self.exit_app)
+        self.btnStop.clicked.connect(self.stop_cap)
+        self.btnOpen.clicked.connect(self.OpenCOMPORT)
+        # adding list of items to combo box 
+        self.comboBox.addItems(getCOMPORTS()) 
 
-
+        # adding resource to table
         self.model = TableModel(getPlate())
         self.tableView.setModel(self.model)
         self.tableView.horizontalHeader().setStretchLastSection(True)
         self.tableView.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
         self.tableView.resizeColumnsToContents()
         
-        self.image_label.setScaledContents(True)
+        self.image_label_2.setScaledContents(True)
 
         self.cap = None                                        #  -capture <-> +cap
 
@@ -197,7 +226,7 @@ class video (QtWidgets.QMainWindow, Ui_MainWindow):
         if self.cap is None:
             self.cap = cv2.VideoCapture(0)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 359)
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH,  779)
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH,  749)
         self.timer.start()
     @QtCore.pyqtSlot()
     def update_frame(self):
@@ -276,7 +305,7 @@ class video (QtWidgets.QMainWindow, Ui_MainWindow):
                         insertDB(img1_link, img2_link, plate)
                         self.model = TableModel(getPlate())
                         self.tableView.setModel(self.model)
-                        application = ApplicationWindow(text=plate, img = img1_link[10], img2 = img2_link[10])
+                        application = ApplicationWindow(text=plate, img = img1_link, img2 = img2_link)
                         application.show()
                         # sys.exit(app.exec_())
                         countPlates += 1
@@ -299,15 +328,15 @@ class video (QtWidgets.QMainWindow, Ui_MainWindow):
         cap.release()
         cv2.destroyAllWindows()
 
-    @QtCore.pyqtSlot()
-    def capture_image(self):
-        flag, frame = self.cap.read()
-        path = r'C:\Users\ung0v\Desktop'                         # 
-        if flag:
-            QtWidgets.QApplication.beep()
-            name = "my_image.jpg"
-            cv2.imwrite(os.path.join(path, name), frame)
-            self._image_counter += 1
+    # @QtCore.pyqtSlot()
+    # def capture_image(self):
+    #     flag, frame = self.cap.read()
+    #     path = r'C:\Users\ung0v\Desktop'                         # 
+    #     if flag:
+    #         QtWidgets.QApplication.beep()
+    #         name = "my_image.jpg"
+    #         cv2.imwrite(os.path.join(path, name), frame)
+    #         self._image_counter += 1
 
     def displayImage(self, img, window=True):
         qformat = QtGui.QImage.Format_Indexed8
@@ -319,8 +348,32 @@ class video (QtWidgets.QMainWindow, Ui_MainWindow):
         outImage = QtGui.QImage(img, img.shape[1], img.shape[0], img.strides[0], qformat)
         outImage = outImage.rgbSwapped()
         if window:
-            self.image_label.setPixmap(QtGui.QPixmap.fromImage(outImage))
+            self.image_label_2.setPixmap(QtGui.QPixmap.fromImage(outImage))
 
+    def OpenCOMPORT(self):
+        currentCOMPORT = self.getCOMPORT_isSelected()
+        ser = serial.Serial(currentCOMPORT, baudrate=9600, timeout=1)
+        ser.write(b'gggggg')
+         # Step 2: Create a QThread object
+        self.thread = QThread()
+        # Step 3: Create a worker object
+        self.worker = Worker()
+        # Step 4: Move worker to the thread
+        self.worker.moveToThread(self.thread)
+        # Step 5: Connect signals and slots
+        self.thread.started.connect(self.worker.run(ser))
+        self.thread.finished.connect(self.thread.deleteLater)
+        # Step 6: Start the thread
+        self.thread.start()
+        self.btnOpen.setEnabled(False)
+            
+    def UpdateValues(self, text):
+        self.textEdit.append(text)
+
+    def getCOMPORT_isSelected(self):
+        currentValue = self.comboBox.currentText()
+        return currentValue
+    
     @QtCore.pyqtSlot()
     def exit_app(self):
         sys.exit(app.exit())

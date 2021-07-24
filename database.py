@@ -21,7 +21,11 @@ def insertDB(img1, img2, plate):
 # insertDB('img1', 'img2', 'plate')
 def getPlate():
     cursor = cnxn.cursor()
-    cursor.execute("SELECT * FROM bienso order by ID desc")
+    try:
+        cursor.execute("SELECT * FROM bienso order by ID desc")
+    except:
+        cursor.execute("CREATE TABLE bienso(ID int not null primary key identity(1,1),Image ntext,Image2 ntext,LicensePlate varchar(50),CreatedDate datetime)")
+        return [['1','1',datetime.datetime.now().strftime("%m/%d/%Y %H:%M:%S")]]
     rows = cursor.fetchall()
     dataPlate = []
     for row in rows:

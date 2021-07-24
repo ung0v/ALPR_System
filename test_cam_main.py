@@ -56,8 +56,8 @@ class video (QtWidgets.QMainWindow, Ui_MainWindow):
 #        uic.loadUi('test2.ui',self)                           # ---
         self.setupUi(self)                                     # +++
 
-        self.pushButton.clicked.connect(self.start_webcam)
-        self.pushButton_3.clicked.connect(self.capture_image)
+        self.btnStart.clicked.connect(self.start_webcam)
+        self.btnExit.clicked.connect(self.capture_image)
 
         self.image_label.setScaledContents(True)
 
